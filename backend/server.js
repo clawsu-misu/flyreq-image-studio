@@ -532,6 +532,33 @@ function hashApiKey(apiKey) {
 }
 
 /**
+ * 读取跨域允许源列表。
+ * @returns {string[]} FLYREQ_CORS_ALLOWED_ORIGINS 按英文逗号拆分、去空白后的来源列表。
+ */
+function getCorsAllowedOrigins() {
+  return String(getRuntimeEnv().FLYREQ_CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 为已授权的跨域请求补充 CORS 响应头。
+ * @param {import('http').IncomingMessage} req HTTP 请求。
+ * @param {import('http').ServerResponse} res HTTP 响应。
+ * @returns {boolean} 请求来源在允许列表内时返回 true。
+ */
+function applyCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  if (!getCorsAllowedOrigins().includes(origin)) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Retry-After');
+  return true;
+}
+
+/**
  * 解析图片模板到实际模型 ID 的运行时环境变量映射。
  * @param {Record<string, string>} env 当前运行时环境变量。
  * @returns {Record<string, string>} 经白名单过滤后的模板模型 ID 映射。
@@ -3739,6 +3766,19 @@ const startServer = () => {
   const httpServer = http.createServer(async (req, res) => {
     const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || `${HOSTNAME}:${PORT}`}`);
     if (parsedUrl.pathname?.startsWith('/api/flyreq/')) {
+      // 跨源支持：先按允许源补 CORS 头；预检请求直接 204 结束，避免落入业务路由。
+      // 未配置 FLYREQ_CORS_ALLOWED_ORIGINS 时不输出任何 CORS 头，既有同源部署行为不变。
+      const corsAllowed = applyCorsHeaders(req, res);
+      if (req.method === 'OPTIONS') {
+        if (corsAllowed) {
+          res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+          res.setHeader('Access-Control-Max-Age', '86400');
+        }
+        res.writeHead(204);
+        res.end();
+        return;
+      }
       const handled = await handleApi(req, res, parsedUrl.pathname);
       if (handled || res.headersSent || res.writableEnded) return;
     }
