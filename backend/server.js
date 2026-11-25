@@ -549,11 +549,16 @@ function getCorsAllowedOrigins() {
  * @returns {boolean} 请求来源在允许列表内时返回 true。
  */
 function applyCorsHeaders(req, res) {
+  const allowedOrigins = getCorsAllowedOrigins();
+  if (allowedOrigins.length > 0) {
+    // 启用跨域后响应头随 Origin 变化，必须声明 Vary，避免不带 Origin 的媒体请求
+    // （如 <img> 加载）缓存结果被后续 CORS fetch（如本地归档图片）复用而缺少 ACAO。
+    res.setHeader('Vary', 'Origin');
+  }
   const origin = req.headers.origin;
   if (!origin) return false;
-  if (!getCorsAllowedOrigins().includes(origin)) return false;
+  if (!allowedOrigins.includes(origin)) return false;
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Retry-After');
   return true;
 }
